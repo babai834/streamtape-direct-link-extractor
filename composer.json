@@ -1,0 +1,27 @@
+{
+    "name": "babai834/streamtape-direct-link-extractor",
+    "description": "Extract direct .mp4 download URLs from Streamtape watch pages.",
+    "type": "project",
+    "license": "MIT",
+    "require": {
+        "php": ">=8.0",
+        "psr/log": "^2.0 || ^3.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.0 || ^11.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Babai834\\StreamtapeExtractor\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Babai834\\StreamtapeExtractor\\Tests\\": "tests/"
+        }
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true
+    }
+}
