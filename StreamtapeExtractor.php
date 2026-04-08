@@ -273,7 +273,8 @@ class StreamtapeExtractor
         // If it is absent the video is almost certainly expired or geo-blocked.
         if (stripos($body, self::CONTENT_DOMAIN_FRAGMENT) === false) {
             // Try to extract a user-facing error message from the page.
-            if (preg_match('/<div[^>]*class="[^"]*error[^"]*"[^>]*>(.*?)<\/div>/is', $body, $m)) {
+            // The `[^<]*` (no `s` flag) prevents matching across multiple tags.
+            if (preg_match('/<div[^>]*class="[^"]*error[^"]*"[^>]*>([^<]*)<\/div>/i', $body, $m)) {
                 $msg = trim(strip_tags($m[1]));
                 throw new \RuntimeException("Video unavailable: {$msg}");
             }
@@ -525,6 +526,14 @@ class StreamtapeExtractor
             } else {
                 $url .= '&dl=1';
             }
+        }
+
+        // Final sanity-check: strip non-printable characters (e.g. null bytes) and
+        // validate the result as a proper URL.  This guards against injection if the
+        // caller ever passes the returned string to a shell or another unsafe context.
+        $url = (string) preg_replace('/[^\x20-\x7E]/', '', $url);
+        if (filter_var($url, FILTER_VALIDATE_URL) === false) {
+            throw new \RuntimeException("Extracted value failed URL validation: {$url}");
         }
 
         return $url;
