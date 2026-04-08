@@ -56,6 +56,23 @@ class StreamtapeExtractor
     ];
 
     /**
+     * Fragment used to detect the CDN domain in the fetched HTML and URLs.
+     * Extracted as a constant so a future CDN migration requires a single edit.
+     */
+    private const CONTENT_DOMAIN_FRAGMENT = 'tapecontent';
+
+    /**
+     * Full CDN domain expected in the final direct link.
+     */
+    private const CONTENT_DOMAIN = 'tapecontent.net';
+
+    /**
+     * The HTML element ID that Streamtape uses to hold (parts of) the video URL.
+     * Extracted here so every regex that references it can be updated in one place.
+     */
+    private const NOROBOTLINK_ELEMENT_ID = 'norobotlink';
+
+    /**
      * HTTP request timeout in seconds.
      */
     private const TIMEOUT = 20;
@@ -252,9 +269,9 @@ class StreamtapeExtractor
             throw new \RuntimeException('Received an empty response body.');
         }
 
-        // Quick sanity-check: Streamtape pages always contain the string "tapecontent".
+        // Quick sanity-check: Streamtape pages always contain the CDN domain fragment.
         // If it is absent the video is almost certainly expired or geo-blocked.
-        if (stripos($body, 'tapecontent') === false) {
+        if (stripos($body, self::CONTENT_DOMAIN_FRAGMENT) === false) {
             // Try to extract a user-facing error message from the page.
             if (preg_match('/<div[^>]*class="[^"]*error[^"]*"[^>]*>(.*?)<\/div>/is', $body, $m)) {
                 $msg = trim(strip_tags($m[1]));
@@ -322,7 +339,8 @@ class StreamtapeExtractor
     private static function extractNorobotlinkBase(string $html, bool $debug): string
     {
         // Pattern 1 – classic single-line assignment.
-        $pattern1 = '/getElementById\s*\(\s*[\'"]norobotlink[\'"]\s*\)\s*\.innerHTML\s*=\s*[\'"]([^\'"]+)[\'"]/i';
+        $elementId = preg_quote(self::NOROBOTLINK_ELEMENT_ID, '/');
+        $pattern1 = '/getElementById\s*\(\s*[\'"]' . $elementId . '[\'"]\s*\)\s*\.innerHTML\s*=\s*[\'"]([^\'"]+)[\'"]/i';
 
         if (preg_match($pattern1, $html, $m)) {
             if ($debug) {
@@ -332,7 +350,7 @@ class StreamtapeExtractor
         }
 
         // Pattern 2 – the value may be wrapped in a template literal (backtick string).
-        $pattern2 = '/getElementById\s*\(\s*[\'"]norobotlink[\'"]\s*\)\s*\.innerHTML\s*=\s*`([^`]+)`/i';
+        $pattern2 = '/getElementById\s*\(\s*[\'"]' . $elementId . '[\'"]\s*\)\s*\.innerHTML\s*=\s*`([^`]+)`/i';
 
         if (preg_match($pattern2, $html, $m)) {
             if ($debug) {
@@ -341,7 +359,7 @@ class StreamtapeExtractor
             return $m[1];
         }
 
-        throw new \RuntimeException("Could not find norobotlink base path in HTML.");
+        throw new \RuntimeException('Could not find norobotlink base path in HTML.');
     }
 
     /**
@@ -358,7 +376,8 @@ class StreamtapeExtractor
     private static function extractNorobotlinkToken(string $html, bool $debug): string
     {
         // Pattern 1 – standard += with quoted string.
-        $pattern1 = '/getElementById\s*\(\s*[\'"]norobotlink[\'"]\s*\)\s*\.innerHTML\s*\+=\s*[\'"]([^\'"]+)[\'"]/i';
+        $elementId = preg_quote(self::NOROBOTLINK_ELEMENT_ID, '/');
+        $pattern1 = '/getElementById\s*\(\s*[\'"]' . $elementId . '[\'"]\s*\)\s*\.innerHTML\s*\+=\s*[\'"]([^\'"]+)[\'"]/i';
 
         if (preg_match($pattern1, $html, $m)) {
             if ($debug) {
@@ -368,7 +387,7 @@ class StreamtapeExtractor
         }
 
         // Pattern 2 – template literal.
-        $pattern2 = '/getElementById\s*\(\s*[\'"]norobotlink[\'"]\s*\)\s*\.innerHTML\s*\+=\s*`([^`]+)`/i';
+        $pattern2 = '/getElementById\s*\(\s*[\'"]' . $elementId . '[\'"]\s*\)\s*\.innerHTML\s*\+=\s*`([^`]+)`/i';
 
         if (preg_match($pattern2, $html, $m)) {
             if ($debug) {
@@ -380,7 +399,7 @@ class StreamtapeExtractor
         // Pattern 3 – Streamtape sometimes uses a variable reference.
         // e.g.:  var tok = 'abc'; ... .innerHTML += tok;
         // First find the += variable name, then look up its value.
-        $pattern3 = '/getElementById\s*\(\s*[\'"]norobotlink[\'"]\s*\)\s*\.innerHTML\s*\+=\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*;/i';
+        $pattern3 = '/getElementById\s*\(\s*[\'"]' . $elementId . '[\'"]\s*\)\s*\.innerHTML\s*\+=\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*;/i';
 
         if (preg_match($pattern3, $html, $varMatch)) {
             $varName = preg_quote($varMatch[1], '/');
@@ -412,10 +431,11 @@ class StreamtapeExtractor
     private static function extractViaVideoVariable(string $html, bool $debug): string
     {
         // Pattern for JS variable assignments.
+        $frag = self::CONTENT_DOMAIN_FRAGMENT;
         $patterns = [
-            '/(?:var|let|const)\s+(?:videoUrl|video_url|fileUrl|file_url|srcUrl|src_url)\s*=\s*[\'"]([^\'"]+tapecontent[^\'"]+)[\'"]/',
-            '/"(?:file|src|url|videoUrl|source)"\s*:\s*"([^"]+tapecontent[^"]+)"/',
-            "/\"(?:file|src|url|videoUrl|source)\"\s*:\s*'([^']+tapecontent[^']+)'/",
+            '/(?:var|let|const)\s+(?:videoUrl|video_url|fileUrl|file_url|srcUrl|src_url)\s*=\s*[\'"]([^\'"]+' . $frag . '[^\'"]+)[\'"]/',
+            '/"(?:file|src|url|videoUrl|source)"\s*:\s*"([^"]+' . $frag . '[^"]+)"/',
+            "/\"(?:file|src|url|videoUrl|source)\"\s*:\s*'([^']+" . $frag . "[^']+)'/",
         ];
 
         foreach ($patterns as $i => $pattern) {
@@ -427,7 +447,9 @@ class StreamtapeExtractor
             }
         }
 
-        throw new \RuntimeException('Could not find tapecontent URL via video-variable patterns.');
+        throw new \RuntimeException(
+            'Could not find ' . self::CONTENT_DOMAIN_FRAGMENT . ' URL via video-variable patterns.'
+        );
     }
 
     /**
@@ -445,7 +467,8 @@ class StreamtapeExtractor
     private static function extractViaTapecontentUrl(string $html, bool $debug): string
     {
         // Match full https?://… or protocol-relative //… tapecontent URLs.
-        $pattern = '~((?:https?:)?//[A-Za-z0-9._-]*tapecontent\.net/[^\s\'"<>"]+\.mp4(?:\?[^\s\'"<>"]*)?)~i';
+        $domain = preg_quote(self::CONTENT_DOMAIN, '~');
+        $pattern = '~((?:https?:)?//[A-Za-z0-9._-]*' . $domain . '/[^\s\'"<>"]+\.mp4(?:\?[^\s\'"<>"]*)?)~i';
 
         if (preg_match($pattern, $html, $m)) {
             if ($debug) {
@@ -454,7 +477,9 @@ class StreamtapeExtractor
             return $m[1];
         }
 
-        throw new \RuntimeException('Could not find any tapecontent.net .mp4 URL in the page HTML.');
+        throw new \RuntimeException(
+            'Could not find any ' . self::CONTENT_DOMAIN . ' .mp4 URL in the page HTML.'
+        );
     }
 
     /**
@@ -485,9 +510,9 @@ class StreamtapeExtractor
             throw new \RuntimeException("Extracted value does not look like a URL: {$url}");
         }
 
-        // Must point to tapecontent.net.
-        if (stripos($url, 'tapecontent.net') === false) {
-            throw new \RuntimeException("Extracted URL does not point to tapecontent.net: {$url}");
+        // Must point to the CDN domain.
+        if (stripos($url, self::CONTENT_DOMAIN) === false) {
+            throw new \RuntimeException('Extracted URL does not point to ' . self::CONTENT_DOMAIN . ": {$url}");
         }
 
         // Append or fix the ?dl=1 download flag.
